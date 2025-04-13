@@ -10,8 +10,8 @@ from datetime import datetime, timedelta
 
 from numpy import format_float_positional
 
-from vnpy_evo.event import Event, EventEngine
-from vnpy_evo.trader.constant import (
+from vnpy.event import Event, EventEngine
+from vnpy.trader.constant import (
     Direction,
     Exchange,
     Product,
@@ -19,8 +19,8 @@ from vnpy_evo.trader.constant import (
     OrderType,
     Interval
 )
-from vnpy_evo.trader.gateway import BaseGateway
-from vnpy_evo.trader.object import (
+from vnpy.trader.gateway import BaseGateway
+from vnpy.trader.object import (
     TickData,
     OrderData,
     TradeData,
@@ -33,10 +33,10 @@ from vnpy_evo.trader.object import (
     SubscribeRequest,
     HistoryRequest
 )
-from vnpy_evo.trader.event import EVENT_TIMER
-from vnpy_evo.trader.utility import round_to, ZoneInfo
-from vnpy_evo.rest import Request, RestClient, Response
-from vnpy_evo.websocket import WebsocketClient
+from vnpy.trader.event import EVENT_TIMER
+from vnpy.trader.utility import round_to, ZoneInfo
+from vnpy_rest import Request, RestClient, Response
+from vnpy_websocket import WebsocketClient
 
 
 # Timezone constant
@@ -82,16 +82,21 @@ DIRECTION_BINANCES2VT: dict[str, Direction] = {v: k for k, v in DIRECTION_VT2BIN
 
 # Kline interval map
 INTERVAL_VT2BINANCES: dict[Interval, str] = {
+    Interval.SECOND: "1s",
     Interval.MINUTE: "1m",
     Interval.HOUR: "1h",
     Interval.DAILY: "1d",
+    Interval.WEEKLY: "1w",
+    Interval.MONTHLY: "1M",
 }
 
 # Timedelta map
 TIMEDELTA_MAP: dict[Interval, timedelta] = {
+    Interval.SECOND: timedelta(seconds=1),
     Interval.MINUTE: timedelta(minutes=1),
     Interval.HOUR: timedelta(hours=1),
     Interval.DAILY: timedelta(days=1),
+    Interval.WEEKLY: timedelta(weeks=1),
 }
 
 # Set weboscket timeout to 24 hour
