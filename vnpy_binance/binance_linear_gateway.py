@@ -37,7 +37,7 @@ from vnpy.trader.event import EVENT_TIMER
 from vnpy.trader.utility import round_to, ZoneInfo
 from vnpy_rest import Request, RestClient, Response
 from vnpy_websocket import WebsocketClient
-
+from vnpy_binance.object import FundingRateData
 
 # Timezone constant
 UTC_TZ = ZoneInfo("UTC")
@@ -189,6 +189,18 @@ class BinanceLinearGateway(BaseGateway):
     def query_history(self, req: HistoryRequest) -> list[BarData]:
         """Query kline history data"""
         return self.rest_api.query_history(req)
+
+    def query_funding_rate_history(self, req: HistoryRequest) -> list[FundingRateData]:
+        """Query funding rate history data"""
+        return self.rest_api.query_funding_rate_history(req)
+
+    def query_single_latest_funding_rate(self, symbol: str) -> FundingRateData:
+        """Query funding rate history data for one symbol"""
+        return self.rest_api.query_single_latest_funding_rate(symbol)
+
+    def query_latest_funding_rates(self) -> list[FundingRateData]:
+        """Query latest funding rates data"""
+        return self.rest_api.query_latest_funding_rates()
 
     def close(self) -> None:
         """Close server connections"""
@@ -742,6 +754,155 @@ class BinanceLinearRestApi(RestClient):
             history.pop(-1)
 
         return history
+
+    def query_funding_rate_history(self, req: HistoryRequest) -> list[FundingRateData]:
+        """Query funding rate history data"""
+        history: list[FundingRateData] = []
+        limit: int = 1000
+
+        start_time: int = int(datetime.timestamp(req.start))
+
+        while True:
+            # Create query parameters
+            params: dict = {"symbol": req.symbol, "limit": limit, "startTime": start_time * 1000}
+
+            path: str = "/fapi/v1/fundingRate"
+            if req.end:
+                end_time = int(datetime.timestamp(req.end))
+                params["endTime"] = end_time * 1000     # Convert to milliseconds
+
+            resp: Response = self.request(
+                "GET",
+                path=path,
+                data={"security": Security.NONE},
+                params=params
+            )
+
+            # Break the loop if request failed
+            if resp.status_code // 100 != 2:
+                msg: str = f"Query funding rate history failed, status code: {resp.status_code}, message: {resp.text}"
+                self.gateway.write_log(msg)
+                break
+            else:
+                data: dict = resp.json()
+                if not data:
+                    msg: str = f"No funding rate history data is received, start time: {start_time}"
+                    self.gateway.write_log(msg)
+                    break
+
+                buf: list[FundingRateData] = []
+
+                for row in data:
+                    rate: FundingRateData = FundingRateData(
+                        symbol=row["symbol"],
+                        exchange=req.exchange,
+                        datetime=generate_datetime(row["fundingTime"]),
+                        funding_rate=float(row["fundingRate"]),
+                        price=float(row["markPrice"]),
+                        gateway_name=self.gateway_name
+                    )
+                    buf.append(rate)
+
+                begin: datetime = buf[0].datetime
+                end: datetime = buf[-1].datetime
+
+                history.extend(buf)
+                msg: str = f"Query funding rate history finished, {req.symbol}, {begin} - {end}"
+                self.gateway.write_log(msg)
+
+                # Break the loop if the latest data received
+                if (
+                    len(data) < limit
+                    or (req.end and end >= req.end)
+                ):
+                    break
+
+                # Update query start time
+                start_dt = rate.datetime + TIMEDELTA_MAP[req.interval]
+                start_time = int(datetime.timestamp(start_dt))
+
+            # Wait to meet request flow limit
+            sleep(0.5)
+
+        return history
+
+    def query_single_latest_funding_rate(self, symbol: str) -> FundingRateData:
+        """Query latest funding rate history data for one symbol"""
+        # Create query parameters
+        params: dict = {"symbol": symbol}
+
+        path: str = "/fapi/v1/premiumIndex"
+
+        resp: Response = self.request(
+            "GET",
+            path=path,
+            data={"security": Security.NONE},
+            params=params
+        )
+
+        if resp.status_code // 100 != 2:
+            msg: str = f"Query single latest funding rate history failed, status code: {resp.status_code}, message: {resp.text}"
+            self.gateway.write_log(msg)
+            return None
+        data: dict = resp.json()
+        if not data:
+            msg: str = f"No funding rate history data is received, start time: {start_time}"
+            self.gateway.write_log(msg)
+            return None
+
+        rate: FundingRateData = FundingRateData(
+            symbol=data["symbol"],
+            exchange=Exchange.BINANCE,
+            datetime=generate_datetime(data["nextFundingTime"]),
+            funding_rate=float(data["lastFundingRate"]),
+            price=float(data["estimatedSettlePrice"]),
+            gateway_name=self.gateway_name
+        )
+        msg: str = f"Query single funding rate history finished, {symbol}"
+        self.gateway.write_log(msg)
+
+        return rate
+
+    def query_latest_funding_rates(self) -> list[FundingRateData]:
+        """Query latest funding rates data"""
+        rates: list[FundingRateData] = []
+
+        # Create query parameters
+        params: dict = {}
+
+        path: str = "/fapi/v1/premiumIndex"
+
+        resp: Response = self.request(
+            "GET",
+            path=path,
+            data={"security": Security.NONE},
+            params=params
+        )
+
+        if resp.status_code // 100 != 2:
+            msg: str = f"Query latest funding rates failed, status code: {resp.status_code}, message: {resp.text}"
+            self.gateway.write_log(msg)
+            return None
+        data: dict = resp.json()
+        if not data:
+            msg: str = "No funding rate history data is received."
+            self.gateway.write_log(msg)
+            return None
+
+        for row in data:
+            rate: FundingRateData = FundingRateData(
+                symbol=row["symbol"],
+                exchange=Exchange.BINANCE,
+                datetime=generate_datetime(row["nextFundingTime"]),
+                funding_rate=float(row["lastFundingRate"]),
+                price=float(row["estimatedSettlePrice"]),
+                gateway_name=self.gateway_name
+            )
+            rates.append(rate)
+        msg: str = "Query latest funding rates history finished."
+        self.gateway.write_log(msg)
+
+        return rates
 
 
 class BinanceLinearUserWebsocketApi(WebsocketClient):
